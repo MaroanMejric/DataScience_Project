@@ -1,0 +1,652 @@
+---
+title: "Data Science sugli attacchi di squalo"
+author: "Mejric Maroan"
+output:
+  revealjs::revealjs_presentation:
+     theme: league
+     highlight: pygments
+     center: true
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache = FALSE, message = FALSE, warning = FALSE)
+```
+
+# Introduzione
+
+# Obiettivo
+
+## Obiettivo
+1. **Andamento degli attacchi per anno**
+1. **Come cambiano gli attacchi in base al paese**
+1. **Chi viene colpito maggiormente da questi attacchi**
+1. **Caratteristiche degli squali più pericolosi**
+
+## Dataset
+
+<div class="centered">
+Il dataset è stato preso da kaggle.com<br>
+e contiene dati presi dal sito<br>
+sharkattackfile.net<br>
+![](img/sharkattackfile.jpg){width=99%}
+</div>
+
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(plotly)
+library(magrittr)
+library(ggthemes)
+library(reshape2)
+library(stringr)
+library(readr)
+library(stringi)
+
+shark <- read.csv("attacks.csv")
+shark <- select(shark, -c(pdf, href.formula, href, Case.Number.1, Case.Number.2, original.order, X, X.1))
+shark <- shark %>% filter(!(is.na(Year)))
+
+'%!in%' <- function(x,y)!('%in%'(x,y)) #fa l'opposto di %in%
+```
+
+Il numero totale di attacchi analizzati sarà: `r nrow(shark) `
+
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+colnames(shark) <- c("Case Number", "Date", "Year", "Type", "Country", "Area", "Location", 
+"Activity", "Name", "Sex", "Age", "Injury", "Fatal_Y_N", "Time", "Species", "Investigator or Source")
+
+temp = shark %>% filter(Year != 0) #rimuove righe che hanno come anno 0
+
+Tempy <- shark$Area
+Tempy %<>% tbl_df() %>% filter(value != "") #lista-->tibble
+Tempy %<>% arrange((value)) #riordina
+```
+
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+Temp1 <- Tempy
+Temp1$Match = 0
+Temp1$Match <- Temp1$value %>% str_extract("\\d") #preleva il primo numero che trova nella campo
+Temp1 %<>% na.omit() #tengo solo le aree che presentano numeri
+
+temp %<>% filter(Area %!in% Temp1$value) #rimuove righe che hanno aree che presentano numeri
+```
+
+
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+Year_Shark_Year <- count(group_by(temp, Year)) %>% #tabella con colonne (anno, numero attacchi)
+  filter(Year %!in% c(5, 77, 500)) %>%
+  filter(Year > 1979 && Year < 2018) %>%
+  ggplot() +
+  geom_bar(mapping = aes(reorder(Year, Year),y = n, fill=n), stat="identity") + 
+  scale_fill_gradient("Numero attacchi", low="yellow", high = "red") +
+  theme(axis.text.x = element_text(angle = 60)) +
+  labs(title = "Numero attacchi di squalo per anno", x = "Anno", y = "Numero attacchi", fill = "Numero attacchi")
+```
+
+# Andamento degli attacchi in base all'anno
+
+## Numero attacchi per anno (1980-2017) 
+<center>
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplotly(Year_Shark_Year)
+```
+</center>
+## Fatalità degli attacchi per anno (1980-2017)
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+Temp3 <- shark %>% select(c(Year,Fatal_Y_N))
+Year_Shark_Year_Fatality <- count(group_by(Temp3, Year, Fatal_Y_N)) %>% #tabella con colonne (anno, numero attacchi)
+  filter(Year %!in% c(5, 77, 500)) %>%
+  filter(Year > 1979 && Year < 2018) %>%
+  filter(Fatal_Y_N %in% c("Y","N")) 
+  
+  Temp3Y <- Year_Shark_Year_Fatality
+  Temp3N <- Year_Shark_Year_Fatality
+  
+  Temp3Y %<>% filter(Fatal_Y_N=="Y")
+  Temp3N %<>% filter(Fatal_Y_N=="N")
+  
+  Year_Shark_Year_Fatality <- inner_join(Temp3Y,Temp3N,by="Year")
+  Year_Shark_Year_Fatality %<>% select(Year,n.x,n.y)
+  colnames(Year_Shark_Year_Fatality) <- c('Year','Fatal','NotFatal')
+
+  for(i in 1:nrow(Year_Shark_Year_Fatality)){
+    Year_Shark_Year_Fatality$fatality_perc[i] <- 100*Year_Shark_Year_Fatality$Fatal[i]/(Year_Shark_Year_Fatality$Fatal[i]+Year_Shark_Year_Fatality$NotFatal[i])
+  }
+  
+  Year_Shark_Fatality <- Year_Shark_Year_Fatality %>%
+  ggplot() +
+  geom_bar(mapping = aes(Year, y = fatality_perc, fill=fatality_perc), stat="identity") + 
+  scale_fill_gradient("Fatalità(in %)", low="yellow", high = "red") +
+  theme(axis.text.x = element_text(angle = 60)) +
+  labs(title = "Percentuale di mortalità attacchi di squalo per anno", x = "Anno", y = "Fatalità(in %)", fill = "%")
+```
+<center>
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplotly(Year_Shark_Fatality)
+```
+</center>
+
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+Yes_No <- c("Y", "N")
+Fatal <- count(group_by(temp, Fatal_Y_N)) %>%
+  filter(Fatal_Y_N %in% Yes_No) #rimuove eventuali altri gruppi
+
+Fatal$sum = sum(Fatal$n)
+Fatal$Percentage = 0
+for(i in 1:nrow(Fatal)){
+Fatal$Percentage[i] <- Fatal$n[i]/Fatal$sum[i]  #calcolo percentuale per riga
+}
+```
+
+# Mortalità totale (1980-2017)
+
+## Mortalità totale (1980-2017) 
+<center>
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+attach(Fatal)
+plot_ly(Fatal, labels=Fatal_Y_N, values = Percentage, type="pie", marker = list(colors = c('yellowgreen', '#DF2B0D'))) %>%
+  layout(title = "Fatalità degli attacchi di squalo in percentuale", paper_bgcolor='#f8f4f4')
+```
+</center>
+# Attacchi suddivisi per paese/area
+
+## Numero di attacchi per paese 
+
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+Shark_Year <- count(group_by(temp, Country)) %>%
+  filter(n > 58) %>%
+  ggplot() +
+  geom_bar(mapping = aes(reorder(Country, n),y = n, fill=n), stat="identity") + 
+  scale_color_fivethirtyeight() +
+  theme_fivethirtyeight() +
+  scale_fill_gradient("Numero attacchi", low="orange", high = "red") +
+  labs(title = "Numero attacchi di squalo per paese", x = "Paese", y = "Numero attacchi", fill = "Numero attacchi") + coord_flip()
+```
+<center>
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplotly(Shark_Year) 
+```
+</center>
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+attack_by_country <- temp %>% select(c(Country, Fatal_Y_N))
+attack_by_country %<>%  filter(Fatal_Y_N %in% Yes_No)
+attack_by_country$Fatal <- attack_by_country$Fatal_Y_N
+attack_by_country %<>% filter(Country != "")
+attack_by_country %<>% arrange(Country)
+
+
+overall_tally_country <- count(group_by(attack_by_country, Country))  #paese|numero attacchi totale
+overall_tally_country %<>% filter(n > 30)
+names_country <- overall_tally_country$Country %>% unique() %>% dput() 
+names_country %<>% tbl_df()
+Country_attack_by_country_fatal <- tally(group_by(attack_by_country, Country, Fatal))
+```
+
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+Country_attack_by_country_fatal %<>% filter(Country %in% names_country$value)
+Country_attack_by_country_fatal1 <- Country_attack_by_country_fatal
+Country_attack_by_country_fatal1 %<>% select(c(Country, Fatal, n))
+Country_attack_by_country_fatal1$sum = 0
+
+for(i in 1:nrow(Country_attack_by_country_fatal1)){     #somma correttà solo sui Fatal=N
+Country_attack_by_country_fatal1$sum[i] <- Country_attack_by_country_fatal$n[i] + Country_attack_by_country_fatal$n[i+1]
+}
+
+for(i in 1:nrow(Country_attack_by_country_fatal1)){    #correggiamo la somma sui Fatal=Y
+  if(i %% 2 == 0){
+    Country_attack_by_country_fatal1$sum[i] <- Country_attack_by_country_fatal1$sum[i-1]
+  }
+}
+
+
+Shark_Fatal_Country <- Country_attack_by_country_fatal1 
+
+Shark_Fatal_Country$Survive = 0
+for(i in 1:nrow(Shark_Fatal_Country)){
+  Shark_Fatal_Country$Survive[i] <- Shark_Fatal_Country$n[i]/Shark_Fatal_Country$sum[i]
+}
+Shark_Fatal_Country$Death = 0
+for(i in 1:nrow(Shark_Fatal_Country)){
+  if(i %% 2 == 0){
+  Shark_Fatal_Country$Death[i] <- 1-Shark_Fatal_Country$Survive[i-1]
+  }
+}
+```
+
+## Numero di attacchi fatali e non per paese 
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+Attack_Country <- Country_attack_by_country_fatal1 %>% 
+  ggplot() +
+  geom_bar(mapping = aes(reorder(Country, n), y=n, fill=Fatal), position='dodge', stat='identity') +
+  scale_fill_manual(values = c('yellowgreen', '#DF2B0D'))+
+  scale_color_fivethirtyeight() +
+  theme_fivethirtyeight() +
+  labs(title = "Numero attacchi fatali e non per paese", x = "Paese", y = "Numero attacchi", fill = "Fatale?") + coord_flip()
+```
+<center>
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplotly(Attack_Country)
+```
+</center>
+## Probabilità di morire a casusa di un attacco per paese 
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+Shark_Fatal_Country_Plot_Die <- Shark_Fatal_Country %>%
+  filter(Fatal == "Y") %>%
+  ggplot() +
+  geom_bar(mapping = aes(reorder(Country, -Death), y=Death, fill=Death, text=paste("Probabilità", n, sep="")), stat='identity') +
+  scale_fill_gradient("Probabilità", low="yellow", high = "red") +
+  scale_color_fivethirtyeight() +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 60))+
+  labs(title = "Probabilità di morire a causa di un attacco per paese", x = "Paese", y = "Probabilità")
+```
+<center>
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplotly(Shark_Fatal_Country_Plot_Die)
+```
+</center>
+## Probabilità di sopravvivere ad un attacco per paese 
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+Shark_Fatal_Country_perc <- Shark_Fatal_Country
+Shark_Fatal_Country_perc$Survive <- Shark_Fatal_Country_perc$Survive * 100 
+Shark_Fatal_Country_Plot_Survive <- Shark_Fatal_Country_perc %>%
+  filter(Fatal == "N") %>%
+  ggplot() +
+  scale_color_fivethirtyeight() +
+  theme_fivethirtyeight() +
+  geom_bar(mapping = aes(reorder(Country, Survive), y=Survive, fill=Survive, text=paste("Number of Survivals: ", n, sep="")), stat='identity') +
+  scale_fill_gradient("Probabilità (in %)", low="red", high = "yellowgreen") +
+  labs(title = "Probabilità di sopravvivere ad un attaco per paese", x = "Paese", y = "Probabilità (in %)") + coord_flip()
+```
+<center>
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplotly(Shark_Fatal_Country_Plot_Survive)
+```
+</center>
+
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+attack <- temp %>% select(c(Area, Fatal_Y_N))
+attack$Fatal <- attack$Fatal_Y_N
+attack %<>% filter(Area != "")   #rimuove righe con campo Area vuoto
+attack %<>% arrange(Area)
+
+overall_tally <- count(group_by(attack, Area)) #teniamo solo aree che hanno subito più di 50 attacchi
+overall_tally %<>% filter(n > 100)
+names <- overall_tally$Area %>% unique() %>% dput() %>% invisible()
+names %<>% tbl_df() #converte a tibble
+
+area_attack_fatal <- count(group_by(attack, Area, Fatal))  #raggruppa in base alle aree e alla fatalità dell'attacco
+```
+
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+area_attack_fatal1 <- area_attack_fatal
+area_attack_fatal1 %<>% filter(Area %in% names$value)
+area_attack_fatal1 %<>% filter(Fatal %in% Yes_No)
+area_attack_fatal1
+
+```
+## Numero di attacchi fatali e non per area
+
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+Attack_Area <- area_attack_fatal1 %>%
+  ggplot() +
+  geom_bar(mapping = aes(reorder(Area, n), y=n, fill=Fatal), position="dodge", stat='identity') +
+  scale_color_fivethirtyeight() +
+  theme_fivethirtyeight() +
+  scale_fill_manual(values = c('yellowgreen', '#DF2B0D'))+
+  labs(title = "Numero attacchi di squalo per area", x = "Area", y = "Numero attacchi", fill = "Fatale?") + coord_flip()
+```
+<center>
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplotly(Attack_Area)
+```
+</center>
+
+# Chi e quando è stato attaccato
+
+## Numero di attacchi suddivisi per età 
+
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+Attack_Age <-
+count(group_by(temp, Age)) %>%
+  filter(Age != "") %>%
+  filter(n > 9) %>%
+  filter(n != 2568) %>%
+  filter(Age %!in% c(1,2,3,4,5,6,7,8,9,61,69)) %>%
+  ggplot() +
+  geom_bar(mapping = aes(Age, y=n, fill=n), stat="identity") +
+  scale_fill_gradient("Numero attacchi", low="yellow", high = "red") +
+  scale_color_fivethirtyeight() +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 60))+
+  labs(title = "Numero attacchi di squalo per età", x = "Età vittima", y = "Numero attacchi", fill = "Numero attacchi")
+```
+
+<center>
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplotly(Attack_Age)
+```
+</center>
+
+## Numero di attacchi fatali e non per attività 
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+shark2 <- shark
+shark2 %<>% filter(Fatal_Y_N %in% c("Y", "N")) 
+
+top_30_activity <- tally(group_by(shark2,Activity)) %>%
+  arrange(desc(n)) %>%
+  filter(Activity != "") %>%
+  select(Activity,n)
+
+top_30_activity %<>% slice(1:30)
+activities <- top_30_activity$Activity %>% unique() %>% dput()
+activities %<>% tbl_df()
+
+Activity_Fatal <- count(group_by(shark2,Activity,Fatal_Y_N)) %>%
+  arrange(desc(n)) %>%
+  filter(Activity != "")
+
+Activity_Fatal %<>% filter(Activity %in% activities$value)
+Activity_Fatal_Plot <- Activity_Fatal %>%
+  ggplot() +
+  geom_bar(mapping = aes(reorder(Activity, -n), y=n, fill=Fatal_Y_N), position ='dodge', stat='identity') +
+  scale_color_fivethirtyeight() +
+  theme_fivethirtyeight() +
+  scale_fill_manual(values = c('yellowgreen', '#DF2B0D'))+
+  theme(axis.text.x = element_text(angle = 60))  +
+  theme(plot.title = element_text(face = "bold")) +
+  labs(title = "Numero di attacchi fatali e non per attività", x = "Attività", y = "Numero attacchi", fill = "Fatale?")
+```
+
+<center>
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplotly(Activity_Fatal_Plot)
+```
+</center>
+
+## Fatalità degli attacchi di squalo per attività 
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+Yes_Fatal <- Activity_Fatal 
+Yes_Fatal %<>% filter(Fatal_Y_N == "Y")
+
+No_Fatal <- Activity_Fatal
+No_Fatal %<>% filter(Fatal_Y_N == "N")
+ 
+Both_Fatal <- inner_join(Yes_Fatal, No_Fatal, by ="Activity")
+names(Both_Fatal) <- c("Activity","Fatal_Y_N.x", "Number_of_Fatalities","Fatal_Y_N.y", "Number_of_Non-Fatalities")
+Both_Fatal %<>% remove_missing()
+Both_Fatal %<>% select(-c(Fatal_Y_N.x, Fatal_Y_N.y))
+
+Both_Fatal$Percent_Fatality = 0
+ for(i in 1:nrow(Both_Fatal)){
+   Both_Fatal[i, "Percent_Fatality"] <- Both_Fatal[i, "Number_of_Fatalities"]/(Both_Fatal[i, "Number_of_Fatalities"] + Both_Fatal[i, "Number_of_Non-Fatalities"])
+ }
+
+
+Bar_Fatality_Percent <- Both_Fatal %>%
+  ggplot() +
+  geom_bar(mapping = aes(reorder(Activity, -Percent_Fatality), y=Percent_Fatality, fill = Percent_Fatality), stat="identity") +
+  scale_fill_gradient("Fatalità", low="yellow", high = "red") +
+  scale_color_fivethirtyeight() +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 60)) +
+  theme(plot.title = element_text(face = "bold")) + 
+  labs(title = "Fatalità degli attacchi di squalo per attività") +
+  theme(plot.title = element_text(size = 11)) +
+  labs(x = "Attività")
+```
+
+<center>
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplotly(Bar_Fatality_Percent)
+```
+</center>
+
+## Numero attacchi per attività e conseguenza 
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+attacks <- shark
+attacks <- attacks %>%
+mutate(fatality=ifelse(`Fatal_Y_N`=='Y',1,0))%>%
+mutate(Injury_Type = ifelse(
+  is.na(Injury), "NA",
+  ifelse(grepl("bitten", Injury, ignore.case = T),"Bitten",                 #grepl è una funzione che controlla se una stringa è contenuta nell'altra(Boolean)
+  ifelse(grepl("Laceration", Injury, ignore.case = T), "Lacerations", 
+  ifelse(grepl("Minor injury", Injury, ignore.case = T), "Injured",
+  ifelse(grepl("Injured", Injury, ignore.case = T), "Injured",
+  ifelse(grepl("Injuries", Injury, ignore.case = T), "Injured",
+  ifelse(grepl("No injury", Injury, ignore.case = T), "No Injury",
+  ifelse(grepl("Disappeared", Injury, ignore.case = T), "Disappeared",      
+  ifelse(grepl("FATAL", Injury, ignore.case = T), "Fatal", "Others")))))))))) %>%
+mutate(Activity_Type = ifelse(
+  is.na(Activity),"NA",
+  ifelse(grepl("Surf.*", Activity, ignore.case = T),"Surfing",
+  ifelse(grepl("Swim.*", Activity, ignore.case = T), "Swimming", 
+  ifelse(grepl("Fishing", Activity, ignore.case = T), "Fishing",
+  ifelse(grepl("Bath.*", Activity, ignore.case = T), "Bathing",
+  ifelse(grepl("Wading", Activity, ignore.case = T), "Wading",
+  ifelse(grepl("Diving", Activity, ignore.case = T), "Diving",
+  ifelse(grepl("Standing", Activity, ignore.case = T), "Standing",      
+  ifelse(grepl("Snorkel+ing", Activity, ignore.case = T), "Snorkelling", "Others"))))))))))
+
+attack_activity_injury <- attacks %>%
+  group_by(Activity_Type, Injury_Type)%>%
+  summarize(count=n(), fatality_rate=sum(fatality, na.rm=TRUE)/n())
+
+colnames(attack_activity_injury) <- c("Activity_Type", "Injury_Type", "Attacchi", "Fatalità")
+
+plot_activity_injury <- attack_activity_injury%>%
+  ggplot(aes(Activity_Type, Injury_Type)) + 
+  geom_point(aes(size = Attacchi, colour=Fatalità)) + 
+  scale_colour_gradientn(colours=c("#59F32C","#F33E17")) + 
+  ggtitle("Numero attacchi per attività e conseguenza") +
+  theme_economist_white() + theme(axis.text.x=element_text(angle=60,vjust=0.5)) +
+  theme(axis.title.y=element_blank(),axis.title.x=element_blank(), legend.position="right")
+```
+
+<center>
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+plot_activity_injury
+```
+</center>
+
+## Numero attacchi per ora 
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+time <- shark %>% select(Time)
+time %<>% filter(nchar(Time)==5)
+time %<>% filter(grepl("h00", Time))
+time %<>% count(group_by(time,Time))
+
+Attacks_byTime <- time %>%
+  ggplot() +
+  geom_bar(mapping = aes(Time, y=n, fill = n), stat="identity") +
+  scale_fill_gradient("Numero Attacchi", low="yellow", high = "red") +
+  scale_color_fivethirtyeight() +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 60)) +
+  theme(plot.title = element_text(face = "bold")) + 
+  labs(title = "Numero attacchi per ora") +
+  theme(plot.title = element_text(size = 11)) +
+  labs(x = "Ore")
+
+
+```
+
+<center>
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplotly(Attacks_byTime)
+```
+</center>
+
+# Attacchi suddivisa per dimensioni e specie dello squalo
+
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+bySharkDimension <- shark %>% select(Species)
+bySharkDimension <- count(group_by(bySharkDimension,Species))
+bySharkDimension %<>% filter(Species != "" && Species != " ")
+bySharkDimension %<>% filter(n>15)
+byinch <- data.frame(c("4' shark","5' shark","6' shark", "8' shark","10' shark"), c(27,32,35,16,22))
+names(byinch) <- c("Species", "n")
+bySharkDimension <- rbind(bySharkDimension, byinch)
+notvalitinputs <- c("Shark involvement prior to death was not confirmed","Shark involvement prior to death unconfirmed","Shark involvement not confirmed","Questionable incident","Questionable","No shark involvement","Invalid","4' to 5' shark","3' to 4' shark","3 m shark","2 m shark", "1.2 m [4'] shark", "1.5 m [5'] shark", "1.8 m [6'] shark", "2.4 m [8'] shark", "3 m [10'] shark")
+bySharkDimension %<>% filter(Species %!in% notvalitinputs)
+bySharkDimension %<>% arrange(Species)    #solo per metterle vicino
+
+for(i in 1:nrow(bySharkDimension)){
+  if(i<nrow(bySharkDimension)){
+    if(bySharkDimension$Species[i] == bySharkDimension$Species[i+1]){              #totale
+      bySharkDimension$n[i] <- bySharkDimension$n[i]+bySharkDimension$n[i+1]
+      bySharkDimension$n[i+1] <- bySharkDimension$n[i]
+    }
+  }
+}
+
+for(i in 1:nrow(bySharkDimension)){                                      
+  if(i<nrow(bySharkDimension)){
+    if(bySharkDimension$Species[i] == bySharkDimension$Species[i+1]){                #togliamo i duplicati
+      bySharkDimension <- bySharkDimension[-(i+1),]
+    }
+  }
+}
+
+bySharkDimension <- rbind(bySharkDimension[2:6,],bySharkDimension[1,],bySharkDimension[7:nrow(bySharkDimension),])      #riordino le righe
+tempFatality <- bySharkDimension$Species
+
+dimensions <- c("1","2","3","4","5","6","7","8","9","0")
+getFirstNum <- bySharkDimension$Species %>% str_extract("\\d")
+bySharkSpecie <- bySharkDimension
+
+for(i in length(getFirstNum):1){                                                 #dividiamo
+    if(getFirstNum[i] %!in% dimensions){
+      bySharkDimension <- bySharkDimension[-(i),]
+    }
+    else{
+      bySharkSpecie <- bySharkSpecie[-(i),]
+    }
+
+}
+
+```
+
+## Numero di attacchi per dimensione dello squalo  
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+Bar_Dimension <- bySharkDimension %>%
+  ggplot() +
+  geom_bar(mapping = aes(reorder(Species, n), y=n, fill = n), stat="identity") +
+  scale_fill_gradient("Numero attacchi", low="yellow", high = "red") +
+  scale_color_fivethirtyeight() +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 60)) +
+  theme(plot.title = element_text(face = "bold")) + 
+  labs(title = "Numero di attacchi per dimensione dello squalo") +
+  theme(plot.title = element_text(size = 11)) +
+  labs(x = "Dimensione")
+```
+
+<center>
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplotly(Bar_Dimension)
+```
+</center>
+
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+bySharkDimensionFatality <- shark %>% select(Species,Fatal_Y_N)  #Tutto questo serve per la fatalità per dimensione/specie
+bySharkDimensionFatality <- count(group_by(bySharkDimensionFatality,Species,Fatal_Y_N))
+bySharkDimensionFatality %<>% filter(Species %in% tempFatality)   #tempFatality preso dalla lavorazione dati precedente, stesse categorie di squali
+bySharkDimensionFatality %<>% filter(Fatal_Y_N %in% c("Y","N"))
+
+Shark_Dimension_Y <- bySharkDimensionFatality
+Shark_Dimension_N <- bySharkDimensionFatality
+
+Shark_Dimension_Y %<>% filter(Fatal_Y_N=="Y")
+Shark_Dimension_N %<>% filter(Fatal_Y_N=="N")
+
+bySharkDimensionFatality <- inner_join(Shark_Dimension_Y,Shark_Dimension_N, by ="Species")
+bySharkDimensionFatality %<>% select(Species,n.x,n.y)
+colnames(bySharkDimensionFatality) <- c('Species','Fatal','NotFatal')
+
+for(i in 1:nrow(bySharkDimensionFatality)){
+    bySharkDimensionFatality$fatality_perc[i] <- 100*bySharkDimensionFatality$Fatal[i]/(bySharkDimensionFatality$Fatal[i]+bySharkDimensionFatality$NotFatal[i])
+}
+
+dimensions <- c("1","2","3","4","5","6","7","8","9","0")
+getFirstNumFatality <- bySharkDimensionFatality$Species %>% str_extract("\\d")
+bySharkSpecieFatality <- bySharkDimensionFatality
+
+for(i in length(getFirstNumFatality):1){                                                 #dividiamo
+    if(getFirstNumFatality[i] %!in% dimensions){
+      bySharkDimensionFatality <- bySharkDimensionFatality[-(i),]
+    }
+    else{
+      bySharkSpecieFatality <- bySharkSpecieFatality[-(i),]
+    }
+
+}
+```
+
+## Fatalità degli attacchi di squalo per dimensione
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+Bar_Dimension_Fatality <- bySharkDimensionFatality %>%
+  ggplot() +
+  geom_bar(mapping = aes(reorder(Species, fatality_perc), y=fatality_perc, fill = fatality_perc), stat="identity") +
+  scale_fill_gradient("Fatalità (in %)", low="#FFAE42", high = "red") +
+  scale_color_fivethirtyeight() +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 60)) +
+  theme(plot.title = element_text(face = "bold")) + 
+  labs(title = "Fatalità degli attacchi di squalo per dimensione") +
+  theme(plot.title = element_text(size = 11)) +
+  labs(x = "Dimensioni")
+```
+
+<center>
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplotly(Bar_Dimension_Fatality)
+```
+</center>
+
+## Numero di attacchi per dimensione dello specie
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+Bar_Specie <- bySharkSpecie %>%
+  ggplot() +
+  geom_bar(mapping = aes(reorder(Species, n), y=n, fill = n), stat="identity") +
+  scale_fill_gradient("Numero attacchi", low="yellow", high = "red") +
+  scale_color_fivethirtyeight() +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 60)) +
+  theme(plot.title = element_text(face = "bold")) + 
+  labs(title = "Numero di attacchi per dimensione dello specie") +
+  theme(plot.title = element_text(size = 11)) +
+  labs(x = "Specie")
+```
+
+<center>
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplotly(Bar_Specie)
+```
+</center>
+
+## Fatalità degli attacchi di squalo per specie
+```{r, results='hide', echo=FALSE, message=FALSE, warning=FALSE}
+Bar_Specie_Fatality <- bySharkSpecieFatality %>%
+  ggplot() +
+  geom_bar(mapping = aes(reorder(Species, fatality_perc), y=fatality_perc, fill = fatality_perc), stat="identity") +
+  scale_fill_gradient("Fatalità (in %)", low="#FFAE42", high = "red") +
+  scale_color_fivethirtyeight() +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 60)) +
+  theme(plot.title = element_text(face = "bold")) + 
+  labs(title = "Fatalità degli attacchi di squalo per specie") +
+  theme(plot.title = element_text(size = 11)) +
+  labs(x = "Specie")
+```
+
+<center>
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplotly(Bar_Specie_Fatality)
+```
+</center>
+
+# Conclusioni
